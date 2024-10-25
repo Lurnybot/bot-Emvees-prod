@@ -148,7 +148,7 @@ sessions = {}
 def create_session(session_id, sessions):
     if session_id not in sessions.keys():
         sessions[session_id] = {
-            "history": ["Tell me about Emvees"],
+            "history": [],
             "created_timestamp": datetime.now()  # Store the current timestamp
         }
         print("Session Created")
@@ -204,7 +204,7 @@ async def chat(request: Request):
     ## Create follow up standalone query
     follow_chain = follow_up_prompt_template | llm | parser
     
-    history_str = "\nUser Query:".join(sessions[session_id]["history"])
+    history_str = "\nUser:".join(sessions[session_id]["history"])
     print(history_str)
     
     new_query = follow_chain.invoke({"history": history_str, "question": user_query})
