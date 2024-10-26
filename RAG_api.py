@@ -35,7 +35,7 @@ from utilities import get_context, get_context_scraped
 
 
 import os
-
+os.chdir(r"C:\Users\shash\OneDrive\Documents\Shashank\React_learning\Client_Final_APIS\bot-Emvees-new")
 
 # Read config file
 config = ConfigParser()
@@ -118,18 +118,18 @@ app.add_middleware(
 
 
 
-res_prompt=  PromptTemplate(template= system_prompt, input_variables= ['question, context'])
+res_prompt=  PromptTemplate(template= system_prompt, input_variables= ['question, context', 'date', 'history'])
 
 follow_up_prompt_template=  PromptTemplate(template= follow_up_prompt, input_variables= ['history, question'])
 
 parser = StrOutputParser()
 
 
-async def generate_stream(chain, user_query, context, final_response):
+async def generate_stream(chain, user_query, context, final_response, session_id, history_str):
     # Create a chat completion request
     # Yield the streaming response
 
-    stream = chain.astream({"question": user_query, "context": context, "date": str(time.ctime()) })
+    stream = chain.astream({"question": user_query, "context": context, "date": str(time.ctime()), "history": history_str })
     async for chunk in stream:
         # print(chunk, type(chunk))  # Iterate over the streaming generator asynchronously
         # print(chunk, end="|", flush=True)  # Stream the output (you can modify the separator if needed)
@@ -139,6 +139,8 @@ async def generate_stream(chain, user_query, context, final_response):
         # Once the streaming is done, save the final response to a file
     
     print(final_response)
+        ### Add new query to message hgistory    
+    sessions[session_id]['history']["bot"].append(final_response)
 
 
 
@@ -148,7 +150,8 @@ sessions = {}
 def create_session(session_id, sessions):
     if session_id not in sessions.keys():
         sessions[session_id] = {
-            "history": ["Tell me about Emvees"],
+            "history": {"user": ["Tell me about Emvees"],
+                        "bot" : []},
             "created_timestamp": datetime.now()  # Store the current timestamp
         }
         print("Session Created")
@@ -204,16 +207,25 @@ async def chat(request: Request):
     ## Create follow up standalone query
     follow_chain = follow_up_prompt_template | llm | parser
     
-    history_str = "\nUser Query:".join(sessions[session_id]["history"])
+    # history_str = "\nUser Query:".join(sessions[session_id]["history"]["user"])
+    user_messages = sessions[session_id]["history"]["user"]
+    bot_messages = sessions[session_id]["history"]["bot"]
+
+    # Combine user and bot messages into an alternating list
+    history_str = ""
+    for user_msg, bot_msg in zip(user_messages, bot_messages):
+        history_str += f"User Query: {user_msg}\n"
+        history_str += f"Bot Response: {bot_msg}\n"
+
     print(history_str)
     
     new_query = follow_chain.invoke({"history": history_str, "question": user_query})
     print("New Query: >>>>", new_query)
     
     ### Add new query to message hgistory    
-    sessions[session_id]['history'].append(new_query)
+    sessions[session_id]['history']["user"].append(new_query)
     #### Keeping only last 4 messages of the session history
-    sessions[session_id]['history'] = sessions[session_id]['history'][-10:]
+    # sessions[session_id]['history'][] = sessions[session_id]['history'][-10:]
     print("session_id : {}\n\n History: {}".format(session_id, sessions[session_id]))
 
 
@@ -221,7 +233,7 @@ async def chat(request: Request):
     chain = res_prompt | llm | parser
     context = get_context_scraped(query=new_query, retriever=retriever,config=kb_params)
     final_response=  ""
-    return StreamingResponse(generate_stream(chain, new_query, context, final_response), media_type="text/plain")
+    return StreamingResponse(generate_stream(chain, new_query, context, final_response, session_id= session_id, history_str =history_str), media_type="text/plain")
 
 
 # 1. Serve static files (Chatbot UI)
