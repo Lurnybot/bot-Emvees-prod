@@ -30,9 +30,8 @@ from datetime import date
 from datetime import datetime
 from configparser import ConfigParser
 import json
-from prompt_templates import system_prompt,follow_up_prompt
+from prompt_templates import system_prompt,follow_up_prompt,language_detection_prompt
 from utilities import get_context, get_context_scraped
-
 
 import os
 
@@ -118,18 +117,20 @@ app.add_middleware(
 
 
 
-res_prompt=  PromptTemplate(template= system_prompt, input_variables= ['question, context'])
+res_prompt=  PromptTemplate(template= system_prompt, input_variables= ['question, context','language_detected'])
 
 follow_up_prompt_template=  PromptTemplate(template= follow_up_prompt, input_variables= ['history, question'])
+
+language_detection_prompt_template = PromptTemplate(template=language_detection_prompt,input_variables=['question'])
 
 parser = StrOutputParser()
 
 
-async def generate_stream(chain, user_query, context, final_response):
+async def generate_stream(chain, user_query, context, final_response,language_detected):
     # Create a chat completion request
     # Yield the streaming response
 
-    stream = chain.astream({"question": user_query, "context": context, "date": str(time.ctime()) })
+    stream = chain.astream({"question": user_query, "context": context, "date": str(time.ctime()),"language_detected":language_detected})
     async for chunk in stream:
         # print(chunk, type(chunk))  # Iterate over the streaming generator asynchronously
         # print(chunk, end="|", flush=True)  # Stream the output (you can modify the separator if needed)
@@ -191,21 +192,36 @@ async def chat(request: Request):
     user_query = data.get("query", "")
     session_id = data.get("sessionId", "")
 
+    # detected_language = detect(data.get("query", ""))
+
     print(data)
     
     # Ensure the user_query is not empty
     if not user_query:
         return {"error": "No query provided"}
     
+
+    
     ## Create new session if user doesnt exists
     create_session(session_id= session_id, sessions= sessions )
     print("All Sessions in memory: ", sessions.keys())
+
+
+    lang_detect_chain = language_detection_prompt_template | llm | parser
+
+    # user_query = "Hello How are you"
+
+    language_detected = lang_detect_chain.invoke({"question":user_query})
     
+    print("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<Language>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", language_detected)
+
+
     ## Create follow up standalone query
     follow_chain = follow_up_prompt_template | llm | parser
     
     history_str = "\nUser:".join(sessions[session_id]["history"])
     print(history_str)
+    # history_str = ''
     
     new_query = follow_chain.invoke({"history": history_str, "question": user_query})
     print("New Query: >>>>", new_query)
@@ -221,7 +237,7 @@ async def chat(request: Request):
     chain = res_prompt | llm | parser
     context = get_context_scraped(query=new_query, retriever=retriever,config=kb_params)
     final_response=  ""
-    return StreamingResponse(generate_stream(chain, new_query, context, final_response), media_type="text/plain")
+    return StreamingResponse(generate_stream(chain, new_query, context, final_response,language_detected), media_type="text/plain")
 
 
 # 1. Serve static files (Chatbot UI)
